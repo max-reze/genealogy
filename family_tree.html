@@ -570,6 +570,18 @@ function assignGenerations(nodeIds, edges) {
     if (!gen.has(id)) { gen.set(id, 0); cycleNodes.push(id); }
   }
 
+  // ── Pull parents down: each node should sit just above its closest child.
+  // Process in decreasing generation order so children are finalised first.
+  // We only ever increase a node's generation (move it closer to its children).
+  const byGenDesc = [...nodeIds].sort((a, b) => (gen.get(b) || 0) - (gen.get(a) || 0));
+  for (const id of byGenDesc) {
+    const kids = childrenOf.get(id);
+    if (!kids.length) continue;
+    const minChildGen = Math.min(...kids.map(cid => gen.get(cid) || 0));
+    const target = minChildGen - 1;
+    if (target > (gen.get(id) || 0)) gen.set(id, target);
+  }
+
   return { gen, cycleNodes };
 }
 
@@ -657,13 +669,16 @@ function render(people, edges, couples) {
   const couplesLayer= svg.select('#couple-bars-layer').html('');
   const nodesLayer  = svg.select('#nodes-layer').html('');
 
-  // ── Draw a straight line from parent bottom-center to child top-center
+  // ── Draw edges; keep a per-node index so drag can update only affected lines
+  const edgesByNode = new Map([...people.keys()].map(id => [id, []]));
   for (const e of edges) {
     const src = people.get(e.source), tgt = people.get(e.target);
     if (!src || !tgt) continue;
-    edgesLayer.append('line').attr('class', 'edge-path')
+    const line = edgesLayer.append('line').attr('class', 'edge-path')
       .attr('x1', src.x + NW / 2).attr('y1', src.y + NH)
       .attr('x2', tgt.x + NW / 2).attr('y2', tgt.y);
+    edgesByNode.get(e.source).push({ line, role: 'source' });
+    edgesByNode.get(e.target).push({ line, role: 'target' });
   }
 
   // ── Draw nodes
@@ -676,7 +691,11 @@ function render(people, edges, couples) {
     .on('mouseover', (evt, d) => showTooltip(d, evt))
     .on('mousemove', (evt)    => moveTooltip(evt))
     .on('mouseout',  ()       => hideTooltip())
-    .on('click',     (evt, d) => { evt.stopPropagation(); openPanel(d.id); });
+    .on('click',     (evt, d) => {
+      evt.stopPropagation();
+      if (d._dragged) { d._dragged = false; return; }
+      openPanel(d.id);
+    });
 
   // Background rect
   nodeGroups.append('rect')
@@ -720,6 +739,30 @@ function render(people, edges, couples) {
   nodesLayer.selectAll('.person-node')
     .filter(d => d.isGhost)
     .attr('opacity', 0.6);
+
+  // ── Drag: move node and redraw its connected edges live
+  nodeGroups.call(
+    d3.drag()
+      .on('start', function(evt, d) {
+        d._dragged = false;
+        hideTooltip();
+        d3.select(this).raise(); // bring dragged node in front of edges
+      })
+      .on('drag', function(evt, d) {
+        d._dragged = true;
+        const k = d3.zoomTransform(document.getElementById('main-svg')).k;
+        d.x += evt.dx / k;
+        d.y += evt.dy / k;
+        d3.select(this).attr('transform', `translate(${d.x},${d.y})`);
+        for (const { line, role } of (edgesByNode.get(d.id) || [])) {
+          if (role === 'source') {
+            line.attr('x1', d.x + NW / 2).attr('y1', d.y + NH);
+          } else {
+            line.attr('x2', d.x + NW / 2).attr('y2', d.y);
+          }
+        }
+      })
+  );
 
   // ── Set up D3 zoom
   initZoom();
