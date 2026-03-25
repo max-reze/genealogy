@@ -571,8 +571,7 @@ function assignGenerations(nodeIds, edges) {
   }
 
   // ── Pull parents down: each node should sit just above its closest child.
-  // Process in decreasing generation order so children are finalised first.
-  // We only ever increase a node's generation (move it closer to its children).
+  // Process deepest-first so children are finalised before their parents.
   const byGenDesc = [...nodeIds].sort((a, b) => (gen.get(b) || 0) - (gen.get(a) || 0));
   for (const id of byGenDesc) {
     const kids = childrenOf.get(id);
@@ -580,6 +579,24 @@ function assignGenerations(nodeIds, edges) {
     const minChildGen = Math.min(...kids.map(cid => gen.get(cid) || 0));
     const target = minChildGen - 1;
     if (target > (gen.get(id) || 0)) gen.set(id, target);
+  }
+
+  // ── Forward pass: pulling a parent down can leave some of its children
+  // above it.  Re-propagate top-down (topological order) to push any such
+  // child back below its parent.
+  const inDeg2 = new Map(nodeIds.map(id => [id, 0]));
+  for (const e of edges) inDeg2.set(e.target, (inDeg2.get(e.target) || 0) + 1);
+  const q2 = [];
+  for (const [id, d] of inDeg2) if (d === 0) q2.push(id);
+  while (q2.length) {
+    const id = q2.shift();
+    for (const cid of childrenOf.get(id)) {
+      const floor = (gen.get(id) || 0) + 1;
+      if ((gen.get(cid) || 0) < floor) gen.set(cid, floor);
+      const nd = inDeg2.get(cid) - 1;
+      inDeg2.set(cid, nd);
+      if (nd === 0) q2.push(cid);
+    }
   }
 
   return { gen, cycleNodes };
