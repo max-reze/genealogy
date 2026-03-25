@@ -1,0 +1,1037 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Family Tree Visualizer</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.0/papaparse.min.js"></script>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #f8fafc;
+      color: #1e293b;
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Toolbar ── */
+    #toolbar {
+      display: none;
+      align-items: center;
+      gap: 10px;
+      padding: 0 16px;
+      height: 52px;
+      background: rgba(255,255,255,0.92);
+      backdrop-filter: blur(8px);
+      border-bottom: 1px solid #e2e8f0;
+      flex-shrink: 0;
+      z-index: 10;
+    }
+    #toolbar.visible { display: flex; }
+
+    #toolbar h1 { font-size: 15px; font-weight: 700; color: #0f172a; white-space: nowrap; }
+
+    #search-wrap { position: relative; flex: 1; max-width: 260px; }
+    #search-input {
+      width: 100%;
+      height: 32px;
+      padding: 0 30px 0 10px;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      font-size: 13px;
+      outline: none;
+      background: #fff;
+    }
+    #search-input:focus { border-color: #6366f1; box-shadow: 0 0 0 2px #e0e7ff; }
+    #search-clear {
+      position: absolute;
+      right: 6px; top: 50%;
+      transform: translateY(-50%);
+      cursor: pointer;
+      font-size: 16px;
+      color: #94a3b8;
+      display: none;
+      background: none;
+      border: none;
+      line-height: 1;
+    }
+    #search-clear.visible { display: block; }
+
+    .btn {
+      height: 32px;
+      padding: 0 12px;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      background: #fff;
+      font-size: 13px;
+      cursor: pointer;
+      color: #334155;
+      white-space: nowrap;
+      transition: background 0.1s;
+    }
+    .btn:hover { background: #f1f5f9; }
+    .btn.icon { width: 32px; padding: 0; font-size: 17px; display: flex; align-items: center; justify-content: center; }
+
+    /* ── Drop zone ── */
+    #drop-zone {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+    }
+    #drop-zone.hidden { display: none; }
+
+    .drop-box {
+      width: 380px;
+      padding: 52px 36px;
+      border: 2px dashed #94a3b8;
+      border-radius: 16px;
+      text-align: center;
+      cursor: pointer;
+      background: #fff;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    .drop-box:hover, .drop-box.dragover { border-color: #6366f1; background: #f5f3ff; }
+    .drop-box .icon-upload { color: #94a3b8; margin-bottom: 14px; }
+    .drop-box h2 { font-size: 18px; font-weight: 600; margin-bottom: 6px; }
+    .drop-box p  { font-size: 13px; color: #64748b; }
+
+    .drop-hint {
+      font-size: 11px;
+      color: #94a3b8;
+      max-width: 400px;
+      text-align: center;
+      line-height: 1.5;
+    }
+
+    #error-msg {
+      display: none;
+      background: #fee2e2;
+      color: #991b1b;
+      border: 1px solid #fca5a5;
+      border-radius: 8px;
+      padding: 10px 16px;
+      font-size: 13px;
+      max-width: 400px;
+    }
+    #error-msg.visible { display: block; }
+
+    /* ── SVG container ── */
+    #svg-container {
+      flex: 1;
+      display: none;
+      position: relative;
+      overflow: hidden;
+    }
+    #svg-container.visible { display: block; }
+
+    #main-svg {
+      width: 100%;
+      height: 100%;
+      cursor: grab;
+    }
+    #main-svg:active { cursor: grabbing; }
+
+    /* ── Warning banner ── */
+    #warning-banner {
+      display: none;
+      position: absolute;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #fef3c7;
+      border: 1px solid #fbbf24;
+      border-radius: 8px;
+      padding: 7px 16px;
+      font-size: 12px;
+      color: #92400e;
+      z-index: 20;
+      max-width: 600px;
+      pointer-events: none;
+    }
+    #warning-banner.visible { display: block; }
+
+    /* ── Tooltip ── */
+    #tooltip {
+      position: fixed;
+      display: none;
+      background: #1e293b;
+      color: #f8fafc;
+      border-radius: 8px;
+      padding: 9px 13px;
+      font-size: 12px;
+      pointer-events: none;
+      max-width: 240px;
+      z-index: 100;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.22);
+      line-height: 1.4;
+    }
+    #tooltip.visible { display: block; }
+    .tt-name  { font-weight: 600; font-size: 13px; margin-bottom: 3px; }
+    .tt-dates { color: #94a3b8; margin-bottom: 3px; }
+    .tt-notes { color: #cbd5e1; font-style: italic; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+
+    /* ── Detail panel ── */
+    #detail-panel {
+      position: absolute;
+      right: 0; top: 0; bottom: 0;
+      width: 300px;
+      background: #fff;
+      border-left: 1px solid #e2e8f0;
+      transform: translateX(100%);
+      transition: transform 0.22s ease;
+      overflow-y: auto;
+      z-index: 30;
+      padding: 20px 18px 24px;
+    }
+    #detail-panel.open { transform: translateX(0); }
+
+    .dp-close {
+      position: absolute;
+      top: 10px; right: 10px;
+      width: 28px; height: 28px;
+      border: none; background: none;
+      font-size: 20px; cursor: pointer;
+      color: #94a3b8; border-radius: 4px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .dp-close:hover { background: #f1f5f9; color: #475569; }
+
+    .dp-name   { font-size: 19px; font-weight: 700; color: #0f172a; padding-right: 28px; margin-bottom: 6px; line-height: 1.3; }
+    .dp-badges { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; }
+    .dp-badge  { display: inline-block; padding: 2px 9px; border-radius: 12px; font-size: 11px; font-weight: 500; }
+    .dp-badge.male     { background: #dbeafe; color: #1d4ed8; }
+    .dp-badge.female   { background: #fce7f3; color: #be185d; }
+    .dp-badge.unknown  { background: #f1f5f9; color: #475569; }
+    .dp-badge.deceased { background: #f8fafc; color: #64748b; border: 1px solid #e2e8f0; }
+    .dp-badge.ghost    { background: #fafafa; color: #94a3b8; border: 1px dashed #cbd5e1; }
+
+    .dp-section { margin-bottom: 14px; }
+    .dp-label   { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #94a3b8; margin-bottom: 4px; }
+    .dp-value   { font-size: 14px; color: #1e293b; }
+
+    .dp-link {
+      display: block;
+      font-size: 13px;
+      color: #6366f1;
+      cursor: pointer;
+      text-decoration: none;
+      padding: 2px 0;
+    }
+    .dp-link:hover { text-decoration: underline; }
+
+    .dp-notes { font-size: 13px; color: #475569; line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
+
+    /* ── Legend ── */
+    #legend {
+      position: absolute;
+      bottom: 14px; left: 14px;
+      background: rgba(255,255,255,0.96);
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-size: 12px;
+      z-index: 20;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.07);
+      user-select: none;
+    }
+    #legend-toggle {
+      display: flex; align-items: center; gap: 6px;
+      cursor: pointer; font-weight: 600; color: #475569;
+    }
+    #legend-toggle svg { transition: transform 0.18s; }
+    #legend-toggle.open svg { transform: rotate(90deg); }
+    #legend-items { margin-top: 9px; display: none; flex-direction: column; gap: 6px; }
+    #legend-items.visible { display: flex; }
+
+    .legend-row  { display: flex; align-items: center; gap: 8px; color: #475569; }
+    .legend-swatch { width: 16px; height: 13px; border-radius: 3px; border: 1.5px solid; flex-shrink: 0; }
+
+    /* ── SVG node interaction ── */
+    .person-node { cursor: pointer; }
+    .person-node .node-bg { transition: filter 0.12s; }
+    .person-node:hover .node-bg { filter: brightness(0.94); }
+    .person-node.highlighted .node-bg { filter: brightness(0.88); }
+    .person-node.faded { opacity: 0.15; pointer-events: none; }
+
+    .edge-path  { fill: none; stroke: #94a3b8; stroke-width: 1.5; }
+    .couple-bar { fill: none; stroke: #64748b; stroke-width: 2; }
+  </style>
+</head>
+<body>
+
+<!-- Toolbar (shown after CSV loaded) -->
+<div id="toolbar">
+  <h1>Family Tree</h1>
+  <div id="search-wrap">
+    <input id="search-input" type="text" placeholder="Search by name…" autocomplete="off">
+    <button id="search-clear" title="Clear search">×</button>
+  </div>
+  <button class="btn icon" id="btn-zoom-in"  title="Zoom in">+</button>
+  <button class="btn icon" id="btn-zoom-out" title="Zoom out">−</button>
+  <button class="btn icon" id="btn-fit"      title="Fit to view">⊡</button>
+  <button class="btn" id="btn-load-new">Load CSV</button>
+</div>
+
+<!-- Drop zone (shown on initial load) -->
+<div id="drop-zone">
+  <div class="drop-box" id="drop-box">
+    <svg class="icon-upload" width="48" height="48" viewBox="0 0 24 24" fill="none"
+         stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+    </svg>
+    <h2>Drop your CSV here</h2>
+    <p>or click to browse</p>
+  </div>
+  <span class="drop-hint">
+    Required columns: <strong>Name, Surname</strong><br>
+    Optional: Birth date, Death date, father name, father surname, mother name, mother surname, notes
+  </span>
+  <div id="error-msg"></div>
+</div>
+
+<!-- Hidden file input -->
+<input type="file" id="file-input" accept=".csv" style="display:none">
+
+<!-- SVG container (shown after CSV loaded) -->
+<div id="svg-container">
+  <svg id="main-svg">
+    <defs>
+      <!-- Hatch pattern for ghost/unknown nodes -->
+      <pattern id="hatch-unknown" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
+        <line x1="0" y1="0" x2="0" y2="6" stroke="#d1d5db" stroke-width="1.5"/>
+      </pattern>
+    </defs>
+    <g id="zoom-container">
+      <g id="edges-layer"></g>
+      <g id="couple-bars-layer"></g>
+      <g id="nodes-layer"></g>
+    </g>
+  </svg>
+
+  <div id="warning-banner"></div>
+
+  <div id="detail-panel">
+    <button class="dp-close" id="dp-close" title="Close">×</button>
+    <div id="dp-content"></div>
+  </div>
+
+  <div id="legend">
+    <div id="legend-toggle">
+      <svg width="10" height="10" viewBox="0 0 10 10">
+        <path d="M3 2l4 3-4 3" stroke="currentColor" stroke-width="1.5" fill="none"
+              stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      Legend
+    </div>
+    <div id="legend-items">
+      <div class="legend-row">
+        <div class="legend-swatch" style="background:#dbeafe;border-color:#3b82f6"></div>Male
+      </div>
+      <div class="legend-row">
+        <div class="legend-swatch" style="background:#fce7f3;border-color:#ec4899"></div>Female
+      </div>
+      <div class="legend-row">
+        <div class="legend-swatch" style="background:#f3f4f6;border-color:#9ca3af"></div>Unknown gender
+      </div>
+      <div class="legend-row">
+        <div class="legend-swatch" style="background:#f8fafc;border-color:#9ca3af;border-style:dashed"></div>Not in dataset
+      </div>
+      <div class="legend-row">
+        <span style="font-weight:700;color:#475569;min-width:16px;text-align:center">†</span>Deceased
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Tooltip -->
+<div id="tooltip">
+  <div class="tt-name"  id="tt-name"></div>
+  <div class="tt-dates" id="tt-dates"></div>
+  <div class="tt-notes" id="tt-notes"></div>
+</div>
+
+<script>
+'use strict';
+
+// ════════════════════════════════════════════════════════════
+// CONSTANTS
+// ════════════════════════════════════════════════════════════
+const NW = 160;   // node width
+const NH = 72;    // node height
+const CG = 12;    // couple gap (between two partners in same unit)
+const UG = 72;    // unit gap (between units in same layer)
+const GH = 170;   // generation height (vertical distance between layers)
+
+// ════════════════════════════════════════════════════════════
+// GLOBAL STATE
+// ════════════════════════════════════════════════════════════
+let state = {
+  people:   null,   // Map<id, PersonNode>
+  edges:    null,   // Edge[]
+  couples:  null,   // Map<key, {p1,p2,children[]}>
+  zoom:     null,   // d3 zoom behaviour
+  selectedId: null,
+};
+
+// ════════════════════════════════════════════════════════════
+// UTILITIES
+// ════════════════════════════════════════════════════════════
+
+function personId(name, surname) {
+  const n = (name    || '').trim().toLowerCase();
+  const s = (surname || '').trim().toLowerCase();
+  return (n || s) ? `${n}|${s}` : null;
+}
+
+function parseYear(raw) {
+  if (!raw) return null;
+  raw = String(raw).trim();
+  let m;
+  if ((m = raw.match(/^(\d{4})-\d{1,2}-\d{1,2}/)))        return +m[1];
+  if ((m = raw.match(/^\d{1,2}[.\/\-]\d{1,2}[.\/\-](\d{4})/))) return +m[1];
+  if ((m = raw.match(/^(\d{4})$/)))                         return +m[1];
+  if ((m = raw.match(/(\d{4})/)))                           return +m[1];
+  return null;
+}
+
+function formatDateRange(birth, death, isDeceased) {
+  const by = birth.year, dy = death.year;
+  if (by && dy)  return `${by} – ${dy}`;
+  if (by && isDeceased) return `${by} – ?`;
+  if (by)        return `b. ${by}`;
+  if (dy)        return `† ${dy}`;
+  if (isDeceased && !by && !dy) return '† (dates unknown)';
+  return '';
+}
+
+function esc(s) {
+  return String(s || '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ════════════════════════════════════════════════════════════
+// CSV PARSING
+// ════════════════════════════════════════════════════════════
+
+function parseCSV(text) {
+  const parsed = Papa.parse(text, {
+    header: true, skipEmptyLines: true,
+    transformHeader: h => h.trim().toLowerCase(),
+  });
+
+  const fields = parsed.meta.fields || [];
+  if (!fields.includes('name') && !fields.includes('surname')) {
+    return { error: 'CSV must contain at least a "Name" or "Surname" column.' };
+  }
+
+  const people   = new Map();
+  const warnings = [];
+
+  // ── Pass 1: create person nodes from CSV rows
+  for (const row of parsed.data) {
+    const name    = (row['name']    || '').trim();
+    const surname = (row['surname'] || '').trim();
+    if (!name && !surname) continue;
+
+    const id = personId(name, surname);
+    if (!id) continue;
+
+    if (people.has(id)) {
+      warnings.push(`Duplicate person ignored: "${name} ${surname}"`);
+      continue;
+    }
+
+    const birthRaw = (row['birth date'] || '').trim();
+    const deathRaw = (row['death date'] || '').trim();
+    const birthYear = parseYear(birthRaw);
+    const deathYear = parseYear(deathRaw);
+    const nowYear   = new Date().getFullYear();
+    const isDeceased = !!deathRaw || !!(birthYear && nowYear - birthYear > 120);
+
+    people.set(id, {
+      id, name, surname,
+      fullName: [name, surname].filter(Boolean).join(' '),
+      birth: { raw: birthRaw, year: birthYear },
+      death: { raw: deathRaw, year: deathYear },
+      isDeceased, gender: 'unknown', isGhost: false,
+      notes: (row['notes'] || '').trim(),
+      _fn: (row['father name']    || '').trim(),
+      _fs: (row['father surname'] || '').trim(),
+      _mn: (row['mother name']    || '').trim(),
+      _ms: (row['mother surname'] || '').trim(),
+      // layout fields set later
+      x: 0, y: 0, generation: 0,
+    });
+  }
+
+  if (people.size === 0) {
+    return { error: 'No valid people found in the CSV.' };
+  }
+
+  // ── Pass 2: gender inference + ghost node creation
+  for (const p of people.values()) {
+    const fid = personId(p._fn, p._fs);
+    const mid = personId(p._mn, p._ms);
+
+    if (fid) {
+      if (people.has(fid)) {
+        people.get(fid).gender = 'male';
+      } else if (p._fn || p._fs) {
+        people.set(fid, ghostNode(fid, p._fn, p._fs, 'male'));
+      }
+    }
+    if (mid) {
+      if (people.has(mid)) {
+        people.get(mid).gender = 'female';
+      } else if (p._mn || p._ms) {
+        people.set(mid, ghostNode(mid, p._mn, p._ms, 'female'));
+      }
+    }
+  }
+
+  // ── Build edges
+  const edges = [];
+  for (const p of people.values()) {
+    const fid = personId(p._fn, p._fs);
+    if (fid && people.has(fid)) edges.push({ source: fid, target: p.id, type: 'father' });
+    const mid = personId(p._mn, p._ms);
+    if (mid && people.has(mid)) edges.push({ source: mid, target: p.id, type: 'mother' });
+  }
+
+  // ── Build couple map  (unique parent pairs that share ≥1 child)
+  const couples = new Map();
+  for (const p of people.values()) {
+    const fid = personId(p._fn, p._fs);
+    const mid = personId(p._mn, p._ms);
+    if (!fid || !mid || !people.has(fid) || !people.has(mid)) continue;
+    const [a, b] = [fid, mid].sort();
+    const key = `${a}~~~${b}`;
+    if (!couples.has(key)) couples.set(key, { p1: fid, p2: mid, children: [] });
+    couples.get(key).children.push(p.id);
+  }
+
+  return { people, edges, couples, warnings };
+}
+
+function ghostNode(id, name, surname, gender) {
+  return {
+    id, name, surname,
+    fullName: [name, surname].filter(Boolean).join(' '),
+    birth: { raw: '', year: null }, death: { raw: '', year: null },
+    isDeceased: true, gender, isGhost: true, notes: '',
+    _fn: '', _fs: '', _mn: '', _ms: '',
+    x: 0, y: 0, generation: 0,
+  };
+}
+
+// ════════════════════════════════════════════════════════════
+// LAYOUT
+// ════════════════════════════════════════════════════════════
+
+function assignGenerations(nodeIds, edges) {
+  const inDeg      = new Map(nodeIds.map(id => [id, 0]));
+  const childrenOf = new Map(nodeIds.map(id => [id, []]));
+
+  for (const e of edges) {
+    inDeg.set(e.target, (inDeg.get(e.target) || 0) + 1);
+    childrenOf.get(e.source).push(e.target);
+  }
+
+  const gen   = new Map();
+  const queue = [];
+
+  for (const [id, d] of inDeg) {
+    if (d === 0) { gen.set(id, 0); queue.push(id); }
+  }
+
+  while (queue.length) {
+    const id = queue.shift();
+    const g  = gen.get(id);
+    for (const cid of childrenOf.get(id)) {
+      const ng = g + 1;
+      if ((gen.get(cid) ?? -1) < ng) gen.set(cid, ng);
+      const nd = inDeg.get(cid) - 1;
+      inDeg.set(cid, nd);
+      if (nd === 0) queue.push(cid);
+    }
+  }
+
+  const cycleNodes = [];
+  for (const id of nodeIds) {
+    if (!gen.has(id)) { gen.set(id, 0); cycleNodes.push(id); }
+  }
+
+  return { gen, cycleNodes };
+}
+
+function computeLayout(people, edges) {
+  const ids = [...people.keys()];
+
+  const childrenOf = new Map(ids.map(id => [id, []]));
+  const parentsOf  = new Map(ids.map(id => [id, []]));
+  for (const e of edges) {
+    childrenOf.get(e.source).push(e.target);
+    parentsOf.get(e.target).push(e.source);
+  }
+
+  const { gen, cycleNodes } = assignGenerations(ids, edges);
+
+  const maxGen = ids.reduce((m, id) => Math.max(m, gen.get(id) || 0), 0);
+  const layers = Array.from({ length: maxGen + 1 }, () => []);
+  for (const id of ids) layers[gen.get(id) || 0].push(id);
+
+  // Center-to-center spacing between nodes in the same generation
+  const SLOT = NW + 80;
+  const nodeCX = new Map(); // center-x for each node
+
+  // ── Step 1: Deepest generation — sequential, left-to-right
+  layers[maxGen].forEach((id, i) => nodeCX.set(id, NW / 2 + i * SLOT));
+
+  // ── Step 2: Bottom-up — center each parent above its children
+  for (let g = maxGen - 1; g >= 0; g--) {
+    const desires = layers[g].map(id => {
+      const kids = childrenOf.get(id).filter(cid => nodeCX.has(cid));
+      return {
+        id,
+        want: kids.length
+          ? kids.reduce((s, cid) => s + nodeCX.get(cid), 0) / kids.length
+          : null,
+      };
+    });
+
+    // Sort by desired position; nodes with no children (want=null) go last
+    desires.sort((a, b) => {
+      if (a.want === null) return  1;
+      if (b.want === null) return -1;
+      return a.want - b.want;
+    });
+
+    // Assign positions, pushing right only enough to maintain minimum gap
+    let floor = NW / 2;
+    for (const { id, want } of desires) {
+      const pos = want !== null ? Math.max(want, floor) : floor;
+      nodeCX.set(id, pos);
+      floor = pos + SLOT;
+    }
+  }
+
+  // ── Step 3: Fallback for any node still unpositioned
+  let fallX = NW / 2;
+  for (const id of ids) {
+    if (!nodeCX.has(id)) { nodeCX.set(id, fallX); fallX += SLOT; }
+  }
+
+  // ── Store positions (node left edge = center - NW/2)
+  for (const p of people.values()) {
+    p.x          = (nodeCX.get(p.id) ?? NW / 2) - NW / 2;
+    p.y          = (gen.get(p.id) || 0) * GH;
+    p.generation =  gen.get(p.id) || 0;
+  }
+
+  return cycleNodes;
+}
+
+// ════════════════════════════════════════════════════════════
+// RENDERING
+// ════════════════════════════════════════════════════════════
+
+function nodeStyle(gender) {
+  if (gender === 'male')   return { fill: '#dbeafe', stroke: '#3b82f6' };
+  if (gender === 'female') return { fill: '#fce7f3', stroke: '#ec4899' };
+  return { fill: '#f3f4f6', stroke: '#9ca3af' };
+}
+
+
+function render(people, edges, couples) {
+  const svg         = d3.select('#main-svg');
+  const edgesLayer  = svg.select('#edges-layer').html('');
+  const couplesLayer= svg.select('#couple-bars-layer').html('');
+  const nodesLayer  = svg.select('#nodes-layer').html('');
+
+  // ── Draw a straight line from parent bottom-center to child top-center
+  for (const e of edges) {
+    const src = people.get(e.source), tgt = people.get(e.target);
+    if (!src || !tgt) continue;
+    edgesLayer.append('line').attr('class', 'edge-path')
+      .attr('x1', src.x + NW / 2).attr('y1', src.y + NH)
+      .attr('x2', tgt.x + NW / 2).attr('y2', tgt.y);
+  }
+
+  // ── Draw nodes
+  const nodeGroups = nodesLayer.selectAll('.person-node')
+    .data([...people.values()], d => d.id)
+    .join('g')
+    .attr('class', 'person-node')
+    .attr('data-id', d => d.id)
+    .attr('transform', d => `translate(${d.x},${d.y})`)
+    .on('mouseover', (evt, d) => showTooltip(d, evt))
+    .on('mousemove', (evt)    => moveTooltip(evt))
+    .on('mouseout',  ()       => hideTooltip())
+    .on('click',     (evt, d) => { evt.stopPropagation(); openPanel(d.id); });
+
+  // Background rect
+  nodeGroups.append('rect')
+    .attr('class', 'node-bg')
+    .attr('width', NW).attr('height', NH).attr('rx', 8)
+    .attr('fill',   d => d.isGhost ? '#f8fafc' : nodeStyle(d.gender).fill)
+    .attr('stroke', d => nodeStyle(d.gender).stroke)
+    .attr('stroke-width', 1.5)
+    .attr('stroke-dasharray', d => d.isGhost ? '5,3' : null);
+
+  // Deceased tint overlay
+  nodeGroups.filter(d => d.isDeceased && !d.isGhost)
+    .append('rect')
+    .attr('width', NW).attr('height', NH).attr('rx', 8)
+    .attr('fill', 'rgba(0,0,0,0.055)')
+    .attr('pointer-events', 'none');
+
+  // Name line
+  nodeGroups.append('text')
+    .attr('x', NW / 2).attr('y', 27)
+    .attr('text-anchor', 'middle')
+    .attr('font-size', 13).attr('font-weight', 600)
+    .attr('fill', d => d.isGhost ? '#94a3b8' : '#0f172a')
+    .text(d => {
+      const label = d.fullName + (d.isDeceased ? ' †' : '');
+      return label.length > 21 ? label.slice(0, 20) + '…' : label;
+    });
+
+  // Date / subtitle line
+  nodeGroups.append('text')
+    .attr('x', NW / 2).attr('y', 47)
+    .attr('text-anchor', 'middle')
+    .attr('font-size', 11)
+    .attr('fill', '#64748b')
+    .text(d => {
+      if (d.isGhost) return '(not in dataset)';
+      return formatDateRange(d.birth, d.death, d.isDeceased);
+    });
+
+  // Ghost opacity
+  nodesLayer.selectAll('.person-node')
+    .filter(d => d.isGhost)
+    .attr('opacity', 0.6);
+
+  // ── Set up D3 zoom
+  initZoom();
+}
+
+// ════════════════════════════════════════════════════════════
+// ZOOM / PAN
+// ════════════════════════════════════════════════════════════
+
+function initZoom() {
+  const svg       = d3.select('#main-svg');
+  const container = svg.select('#zoom-container');
+
+  state.zoom = d3.zoom()
+    .scaleExtent([0.04, 4])
+    .on('zoom', evt => container.attr('transform', evt.transform));
+
+  svg.call(state.zoom);
+  svg.on('click.deselect', () => { closePanel(); clearSearch(); });
+
+  setTimeout(fitView, 60);
+}
+
+function fitView() {
+  if (!state.people) return;
+  const el = document.getElementById('main-svg');
+  const W  = el.clientWidth, H = el.clientHeight;
+  if (!W || !H) return;
+
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const p of state.people.values()) {
+    x0 = Math.min(x0, p.x);       y0 = Math.min(y0, p.y);
+    x1 = Math.max(x1, p.x + NW);  y1 = Math.max(y1, p.y + NH);
+  }
+  if (x0 === Infinity) return;
+
+  const pad = 60;
+  const scale = Math.min((W - pad * 2) / (x1 - x0), (H - pad * 2) / (y1 - y0), 1.5);
+  const tx = (W - (x1 - x0) * scale) / 2 - x0 * scale;
+  const ty = (H - (y1 - y0) * scale) / 2 - y0 * scale;
+
+  d3.select('#main-svg')
+    .transition().duration(400)
+    .call(state.zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(scale));
+}
+
+function panToNode(p) {
+  const el = document.getElementById('main-svg');
+  const W  = el.clientWidth, H = el.clientHeight;
+  const cur = d3.zoomTransform(el);
+  const tx  = W / 2 - (p.x + NW / 2) * cur.k;
+  const ty  = H / 2 - (p.y + NH / 2) * cur.k;
+  d3.select('#main-svg')
+    .transition().duration(350)
+    .call(state.zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(cur.k));
+}
+
+// ════════════════════════════════════════════════════════════
+// TOOLTIP
+// ════════════════════════════════════════════════════════════
+
+function showTooltip(d, evt) {
+  document.getElementById('tt-name').textContent  = d.fullName + (d.isDeceased ? ' †' : '');
+  const dates = formatDateRange(d.birth, d.death, d.isDeceased);
+  const ttDates = document.getElementById('tt-dates');
+  ttDates.textContent = dates;
+  ttDates.style.display = dates ? '' : 'none';
+  const ttNotes = document.getElementById('tt-notes');
+  ttNotes.textContent  = d.notes;
+  ttNotes.style.display = d.notes ? '' : 'none';
+  document.getElementById('tooltip').classList.add('visible');
+  moveTooltip(evt);
+}
+
+function moveTooltip(evt) {
+  const tt = document.getElementById('tooltip');
+  const x  = evt.clientX + 14;
+  const y  = evt.clientY - 12;
+  tt.style.left = Math.min(x, window.innerWidth  - tt.offsetWidth  - 10) + 'px';
+  tt.style.top  = Math.max(4, Math.min(y, window.innerHeight - tt.offsetHeight - 4)) + 'px';
+}
+
+function hideTooltip() {
+  document.getElementById('tooltip').classList.remove('visible');
+}
+
+// ════════════════════════════════════════════════════════════
+// DETAIL PANEL
+// ════════════════════════════════════════════════════════════
+
+function openPanel(id) {
+  const p = state.people?.get(id);
+  if (!p) return;
+
+  state.selectedId = id;
+
+  const gLabel = p.gender === 'male' ? 'Male' : p.gender === 'female' ? 'Female' : 'Unknown';
+  let html = `
+    <div class="dp-name">${esc(p.fullName)}</div>
+    <div class="dp-badges">
+      <span class="dp-badge ${p.gender}">${gLabel}</span>
+      ${p.isDeceased ? '<span class="dp-badge deceased">† Deceased</span>' : ''}
+      ${p.isGhost    ? '<span class="dp-badge ghost">Not in dataset</span>' : ''}
+    </div>`;
+
+  if (p.birth.raw || p.death.raw) {
+    html += `<div class="dp-section">`;
+    if (p.birth.raw) html += `<div class="dp-label">Born</div><div class="dp-value">${esc(p.birth.raw)}</div>`;
+    if (p.death.raw) html += `<div class="dp-label" style="margin-top:8px">Died</div><div class="dp-value">${esc(p.death.raw)}</div>`;
+    html += `</div>`;
+  }
+
+  // Parents
+  const fid = personId(p._fn, p._fs);
+  const mid = personId(p._mn, p._ms);
+  const hasFather = p._fn || p._fs;
+  const hasMother = p._mn || p._ms;
+
+  if (hasFather || hasMother) {
+    html += `<div class="dp-section"><div class="dp-label">Parents</div>`;
+    if (hasFather) {
+      const fn = [p._fn, p._fs].filter(Boolean).join(' ');
+      if (fid && state.people?.has(fid)) {
+        html += `<a class="dp-link" data-jump="${esc(fid)}">♂ ${esc(fn)}</a>`;
+      } else {
+        html += `<div class="dp-value" style="color:#94a3b8">♂ ${esc(fn)}</div>`;
+      }
+    }
+    if (hasMother) {
+      const mn = [p._mn, p._ms].filter(Boolean).join(' ');
+      if (mid && state.people?.has(mid)) {
+        html += `<a class="dp-link" data-jump="${esc(mid)}">♀ ${esc(mn)}</a>`;
+      } else {
+        html += `<div class="dp-value" style="color:#94a3b8">♀ ${esc(mn)}</div>`;
+      }
+    }
+    html += `</div>`;
+  }
+
+  // Children
+  const children = [...(state.people?.values() || [])].filter(q =>
+    personId(q._fn, q._fs) === id || personId(q._mn, q._ms) === id
+  );
+  if (children.length) {
+    html += `<div class="dp-section"><div class="dp-label">Children (${children.length})</div>`;
+    for (const ch of children)
+      html += `<a class="dp-link" data-jump="${esc(ch.id)}">${esc(ch.fullName)}${ch.isDeceased?' †':''}</a>`;
+    html += `</div>`;
+  }
+
+  if (p.notes) {
+    html += `<div class="dp-section"><div class="dp-label">Notes</div><div class="dp-notes">${esc(p.notes)}</div></div>`;
+  }
+
+  document.getElementById('dp-content').innerHTML = html;
+  document.getElementById('detail-panel').classList.add('open');
+
+  d3.selectAll('.person-node')
+    .classed('highlighted', d => d.id === id)
+    .classed('faded', false);
+
+  panToNode(p);
+}
+
+function closePanel() {
+  document.getElementById('detail-panel').classList.remove('open');
+  state.selectedId = null;
+  d3.selectAll('.person-node').classed('highlighted', false).classed('faded', false);
+}
+
+// ════════════════════════════════════════════════════════════
+// SEARCH
+// ════════════════════════════════════════════════════════════
+
+function doSearch(q) {
+  q = q.trim().toLowerCase();
+  document.getElementById('search-clear').classList.toggle('visible', !!q);
+
+  if (!q) {
+    d3.selectAll('.person-node').classed('faded', false).classed('highlighted', false);
+    return;
+  }
+
+  let first = null;
+  d3.selectAll('.person-node').each(function(d) {
+    const match = d.fullName.toLowerCase().includes(q);
+    d3.select(this).classed('faded', !match).classed('highlighted', match);
+    if (match && !first) first = d;
+  });
+
+  if (first) panToNode(first);
+}
+
+function clearSearch() {
+  document.getElementById('search-input').value = '';
+  doSearch('');
+}
+
+// ════════════════════════════════════════════════════════════
+// LOAD CSV
+// ════════════════════════════════════════════════════════════
+
+function loadText(text) {
+  document.getElementById('error-msg').classList.remove('visible');
+  document.getElementById('warning-banner').classList.remove('visible');
+
+  const result = parseCSV(text);
+
+  if (result.error) {
+    const el = document.getElementById('error-msg');
+    el.textContent = result.error;
+    el.classList.add('visible');
+    return;
+  }
+
+  const { people, edges, couples, warnings } = result;
+
+  if (warnings.length) {
+    const wb = document.getElementById('warning-banner');
+    wb.textContent = '⚠ ' + warnings.join(' · ');
+    wb.classList.add('visible');
+  }
+
+  const cycleNodes = computeLayout(people, edges);
+  if (cycleNodes.length) {
+    const wb = document.getElementById('warning-banner');
+    wb.textContent = (wb.textContent ? wb.textContent + ' · ' : '⚠ ') +
+      `Cycle detected; ${cycleNodes.length} node(s) placed at generation 0.`;
+    wb.classList.add('visible');
+  }
+
+  state.people  = people;
+  state.edges   = edges;
+  state.couples = couples;
+  state.selectedId = null;
+
+  // Switch UI
+  document.getElementById('drop-zone').classList.add('hidden');
+  document.getElementById('toolbar').classList.add('visible');
+  document.getElementById('svg-container').classList.add('visible');
+
+  render(people, edges, couples);
+}
+
+function loadFile(file) {
+  const reader = new FileReader();
+  reader.onload = e => loadText(e.target.result);
+  reader.readAsText(file);
+}
+
+// ════════════════════════════════════════════════════════════
+// BOOT / EVENT WIRING
+// ════════════════════════════════════════════════════════════
+
+document.addEventListener('DOMContentLoaded', () => {
+  const dropBox   = document.getElementById('drop-box');
+  const fileInput = document.getElementById('file-input');
+
+  // ── Drop zone ──
+  dropBox.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', e => { if (e.target.files[0]) loadFile(e.target.files[0]); });
+
+  dropBox.addEventListener('dragover',  e => { e.preventDefault(); dropBox.classList.add('dragover'); });
+  dropBox.addEventListener('dragleave', ()  => dropBox.classList.remove('dragover'));
+  dropBox.addEventListener('drop', e => {
+    e.preventDefault(); dropBox.classList.remove('dragover');
+    if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]);
+  });
+
+  // Page-level drag-drop
+  document.body.addEventListener('dragover', e => e.preventDefault());
+  document.body.addEventListener('drop', e => {
+    e.preventDefault();
+    if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]);
+  });
+
+  // ── Toolbar buttons ──
+  document.getElementById('btn-zoom-in').addEventListener('click', () =>
+    d3.select('#main-svg').transition().duration(200).call(state.zoom.scaleBy, 1.4));
+  document.getElementById('btn-zoom-out').addEventListener('click', () =>
+    d3.select('#main-svg').transition().duration(200).call(state.zoom.scaleBy, 1 / 1.4));
+  document.getElementById('btn-fit').addEventListener('click', fitView);
+  document.getElementById('btn-load-new').addEventListener('click', () => {
+    document.getElementById('drop-zone').classList.remove('hidden');
+    document.getElementById('toolbar').classList.remove('visible');
+    document.getElementById('svg-container').classList.remove('visible');
+    fileInput.value = '';
+  });
+
+  // ── Search ──
+  document.getElementById('search-input').addEventListener('input', e => doSearch(e.target.value));
+  document.getElementById('search-input').addEventListener('keydown', e => {
+    if (e.key === 'Escape') clearSearch();
+  });
+  document.getElementById('search-clear').addEventListener('click', clearSearch);
+
+  // ── Detail panel ──
+  document.getElementById('dp-close').addEventListener('click', e => { e.stopPropagation(); closePanel(); });
+  document.getElementById('detail-panel').addEventListener('click', e => e.stopPropagation());
+  document.getElementById('dp-content').addEventListener('click', e => {
+    const link = e.target.closest('[data-jump]');
+    if (link) { e.preventDefault(); openPanel(link.dataset.jump); }
+  });
+
+  // ── Legend toggle ──
+  document.getElementById('legend-toggle').addEventListener('click', () => {
+    const t = document.getElementById('legend-toggle');
+    const i = document.getElementById('legend-items');
+    const open = i.classList.toggle('visible');
+    t.classList.toggle('open', open);
+  });
+});
+</script>
+</body>
+</html>
